@@ -19,7 +19,7 @@ function fallback(message:string) {
 export async function analyzeDistress(message:string) {
   if(!process.env.AI_API_KEY) return fallback(message);
   try {
-    const response=await fetch('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${process.env.AI_API_KEY}`},body:JSON.stringify({model:process.env.AI_MODEL||'gpt-4o-mini',response_format:{type:'json_object'},messages:[{role:'system',content:'Extract maritime distress data. Return JSON with severity (INFO, WARNING, HIGH, CRITICAL), issue, injuryCount integer, cargoDamagePercent number or null, requiresAssistance boolean, summary.'},{role:'user',content:message}]})});
+    const response=await fetch('https://api.openai.com/v1/chat/completions',{method:'POST',signal:AbortSignal.timeout(15_000),headers:{'Content-Type':'application/json',Authorization:`Bearer ${process.env.AI_API_KEY}`},body:JSON.stringify({model:process.env.AI_MODEL||'gpt-4o-mini',response_format:{type:'json_object'},messages:[{role:'system',content:'Extract maritime distress data. Return JSON with severity (INFO, WARNING, HIGH, CRITICAL), issue, injuryCount integer, cargoDamagePercent number or null, requiresAssistance boolean, summary.'},{role:'user',content:message}]})});
     if(!response.ok) throw new Error(`AI request ${response.status}`);
     const data:any=await response.json();const raw=JSON.parse(data.choices?.[0]?.message?.content||'{}');return DistressAnalysis.parse({...raw,source:'ai'});
   } catch { return fallback(message); }

@@ -13,7 +13,7 @@ import './styles.css';
 type Point = { lat: number; lng: number };
 type ShipData = {
   id: string; name: string; latitude: number; longitude: number; speed: number; heading: number;
-  destination: { name: string; lat: number; lng: number }; fuel: number; cargo: { type: string };
+  destination: { name: string; lat: number; lng: number }; fuel: number; fuelCapacityTons: number; cargo: { type: string };
   status: string; route: Point[]; weather: any; pendingDirective?: any;
 };
 type AlertData = { id: string; type: string; severity: string; shipId: string | null; message: string; status: string; createdAt: number };
@@ -45,12 +45,18 @@ function MapEvents({ onCursor }: { onCursor: (point: Point) => void }) {
   return null;
 }
 
-function MapFocus({ ship }: { ship: ShipData | undefined }) {
+function MapFocus({ ship, ships }: { ship: ShipData | undefined; ships: ShipData[] }) {
   const map = useMap();
+  const fittedFleet = useRef(false);
   useEffect(() => {
-    if (!ship) return;
-    map.flyTo([ship.latitude, ship.longitude], Math.max(map.getZoom(), 8), { duration: 0.9 });
-  }, [map, ship?.id]);
+    if (ship) {
+      map.flyTo([ship.latitude, ship.longitude], Math.max(map.getZoom(), 8), { duration: 0.9 });
+      return;
+    }
+    if (!ships.length || fittedFleet.current) return;
+    map.fitBounds(L.latLngBounds(ships.map(item => L.latLng(item.latitude, item.longitude))), { padding: [60, 60], maxZoom: 7 });
+    fittedFleet.current = true;
+  }, [map, ship?.id, ships.length]);
   return null;
 }
 
@@ -79,12 +85,14 @@ function App() {
   const [state, setState] = useState<FleetState | null>(null);
   const [visualShips, setVisualShips] = useState<ShipData[]>([]);
   const [role, setRole] = useState<'COMMAND' | 'CAPTAIN'>('COMMAND');
-  const [captain, setCaptain] = useState('ship-01');
+  const [captain, setCaptain] = useState('MV-1');
+  const [sessionReady, setSessionReady] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('2D');
   const [drawing, setDrawing] = useState(false);
+  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [playback, setPlayback] = useState<number | null>(null);
   const [toast, setToast] = useState('');
@@ -111,7 +119,21 @@ function App() {
   }, []);
 
   useEffect(() => {
-    socket?.emit('session:join', { role, shipId: role === 'CAPTAIN' ? captain : undefined });
+    if (!socket) return;
+    let active = true;
+    const joinSession = () => {
+      setSessionReady(false);
+      socket.emit('session:join', { role, shipId: role === 'CAPTAIN' ? captain : undefined }, (response: any) => {
+        if (!active) return;
+        setSessionReady(Boolean(response?.ok));
+        if (!response?.ok) setToast(response?.error || 'Unable to join this session');
+      });
+    };
+    const disconnected = () => setSessionReady(false);
+    socket.on('connect', joinSession);
+    socket.on('disconnect', disconnected);
+    if (socket.connected) joinSession();
+    return () => { active = false; socket.off('connect', joinSession); socket.off('disconnect', disconnected); };
   }, [socket, role, captain]);
 
   useEffect(() => {
@@ -124,11 +146,12 @@ function App() {
       const progress = Math.min(1, (performance.now() - started) / 900);
       setVisualShips(target.map(ship => {
         const old = previous.get(ship.id) || ship;
+        const headingDelta = ((ship.heading - old.heading + 540) % 360) - 180;
         return {
           ...ship,
           latitude: old.latitude + (ship.latitude - old.latitude) * progress,
           longitude: old.longitude + (ship.longitude - old.longitude) * progress,
-          heading: old.heading + (ship.heading - old.heading) * progress,
+          heading: (old.heading + headingDelta * progress + 360) % 360,
         };
       }));
       if (progress < 1) frame = requestAnimationFrame(animate);
@@ -143,15 +166,28 @@ function App() {
   }, []);
 
   const ships = state?.ships || [];
+  const visibleShips = role === 'CAPTAIN' ? ships.filter(ship => ship.id === captain) : ships;
   const selectedShip = ships.find(ship => ship.id === (selectedId || (role === 'CAPTAIN' ? captain : null)));
   const hoveredShip = ships.find(ship => ship.id === hoveredId);
-  const detailShip = hoveredShip || selectedShip;
-  const activeAlerts = state?.alerts.filter(alert => alert.status !== 'RESOLVED') || [];
-  const normalCount = ships.filter(ship => ship.status === 'NORMAL').length;
-  const reroutingCount = ships.filter(ship => ship.status === 'REROUTING').length;
-  const playbackShips = useMemo(() => playback === null
-    ? visualShips
-    : history.filter(item => item.timestamp === history[playback]?.timestamp), [playback, visualShips, history]);
+  const detailShip = role === 'CAPTAIN' ? selectedShip : hoveredShip || selectedShip;
+  const selectedZone = state?.zones.find(zone => zone.id === selectedZoneId);
+  const activeAlerts = state?.alerts.filter(alert => alert.status === 'ACTIVE' &&
+    (role !== 'CAPTAIN' || !alert.shipId || alert.shipId === captain)) || [];
+  const normalCount = visibleShips.filter(ship => ship.status === 'NORMAL').length;
+  const reroutingCount = visibleShips.filter(ship => ship.status === 'REROUTING').length;
+  const historyFrames = useMemo(() => {
+    const groups = new Map<string, any[]>();
+    for (const row of history) {
+      const key = new Date(row.timestamp).toISOString();
+      const frame = groups.get(key) || [];
+      frame.push({ ...row, id: row.ship_id, latitude: Number(row.latitude), longitude: Number(row.longitude) });
+      groups.set(key, frame);
+    }
+    return Array.from(groups, ([timestamp, frameShips]) => ({ timestamp, ships: frameShips }))
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  }, [history]);
+  const playbackFleet = playback === null ? visualShips : historyFrames[playback]?.ships || [];
+  const playbackShips = role === 'CAPTAIN' ? playbackFleet.filter(ship => ship.id === captain) : playbackFleet;
 
   const emit = (event: string, payload: any, done?: () => void) => {
     socket?.emit(event, payload, (response: any) => {
@@ -174,6 +210,27 @@ function App() {
     }
     emit('directive:create', { shipId: ship.id, type, payload });
   };
+  const changeRole = (nextRole: 'COMMAND' | 'CAPTAIN') => {
+    if (nextRole === role) return;
+    setSelectedId(null); setHoveredId(null); setSessionReady(false); setRole(nextRole);
+  };
+  const editZone = (zone: any) => {
+    const name = window.prompt('Restricted-zone name', zone.name);
+    if (!name) return;
+    const raw = window.prompt('Polygon points as JSON [{"lat":26,"lng":56}, ...]', JSON.stringify(zone.polygon));
+    if (!raw) return;
+    try {
+      const polygon = JSON.parse(raw);
+      if (!Array.isArray(polygon) || polygon.length < 3 || polygon.some((point: any) => !Number.isFinite(point.lat) || !Number.isFinite(point.lng))) throw new Error();
+      emit('zone:update', { id: zone.id, name, polygon });
+      setSelectedZoneId(null);
+    } catch { setToast('Enter at least three valid latitude/longitude points'); }
+  };
+  const deleteZone = (zone: any) => {
+    if (!window.confirm(`Delete restricted zone “${zone.name}”?`)) return;
+    emit('zone:delete', zone.id);
+    setSelectedZoneId(null);
+  };
   const startDrawing = () => setDrawing(value => !value);
 
   return <div className="shell" onPointerDown={enableAudio}>
@@ -181,15 +238,15 @@ function App() {
       <div className="brand"><Anchor size={21} /><span>HELM</span><small>MARITIME OPERATIONS</small></div>
       <div className="top-status"><span className="live-dot" /> LIVE FEED <b>{ships.length} VESSELS</b></div>
       <div className="role-switch">
-        <button className={role === 'COMMAND' ? 'active' : ''} onClick={() => setRole('COMMAND')}>COMMAND</button>
-        <button className={role === 'CAPTAIN' ? 'active' : ''} onClick={() => setRole('CAPTAIN')}>CAPTAIN</button>
-        {role === 'CAPTAIN' && <select value={captain} onChange={event => setCaptain(event.target.value)}>{ships.map(ship => <option key={ship.id} value={ship.id}>{ship.name}</option>)}</select>}
+        <button className={role === 'COMMAND' ? 'active' : ''} onClick={() => changeRole('COMMAND')}>COMMAND</button>
+        <button className={role === 'CAPTAIN' ? 'active' : ''} onClick={() => changeRole('CAPTAIN')}>CAPTAIN</button>
+        {role === 'CAPTAIN' && <select value={captain} onChange={event => { setSelectedId(null); setHoveredId(null); setSessionReady(false); setCaptain(event.target.value); }}>{ships.map(ship => <option key={ship.id} value={ship.id}>{ship.name}</option>)}</select>}
       </div>
     </header>
 
     <main className="workspace">
       <aside className="fleet-panel">
-        <div className="panel-heading"><span>FLEET OVERVIEW</span><b>{ships.length.toString().padStart(2, '0')} / 15</b></div>
+        <div className="panel-heading"><span>{role === 'CAPTAIN' ? 'ASSIGNED VESSEL' : 'FLEET OVERVIEW'}</span><b>{visibleShips.length.toString().padStart(2, '0')} / {role === 'CAPTAIN' ? '01' : '15'}</b></div>
         <div className="metrics">
           <Metric number={normalCount} label="NORMAL" />
           <Metric number={reroutingCount} label="REROUTING" />
@@ -197,11 +254,11 @@ function App() {
         </div>
         <div className="list-heading"><span>ACTIVE VESSELS</span><span>LIVE</span></div>
         <div className="ship-list">
-          {ships.map(ship => <button key={ship.id}
+          {visibleShips.map(ship => <button key={ship.id}
             className={`ship-row${selectedShip?.id === ship.id ? ' selected' : ''}${hoveredId === ship.id ? ' hovered' : ''}`}
             onClick={() => setSelectedId(ship.id)} onMouseEnter={() => setHoveredId(ship.id)} onMouseLeave={() => setHoveredId(null)}>
             <i className="ship-dot" style={{ background: statusColors[ship.status] || '#46e6a5' }} />
-            <span className="ship-row-copy"><strong>{ship.name}</strong><small>{ship.status.replaceAll('_', ' ')} · {ship.speed.toFixed(1)} kn</small></span>
+            <span className="ship-row-copy"><strong>{ship.name}</strong><small>{ship.status.replaceAll('_', ' ')} · {(ship.speed / 1.852).toFixed(1)} kn</small></span>
             <ChevronRight size={14} />
           </button>)}
         </div>
@@ -212,7 +269,7 @@ function App() {
           <MapContainer center={[26, 56]} zoom={7} zoomControl={false} preferCanvas>
             <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             <MapEvents onCursor={setCursor} />
-            <MapFocus ship={selectedShip} />
+            <MapFocus ship={selectedShip} ships={visibleShips} />
             <MapZoomControls />
             {drawing && <DrawZone onComplete={points => {
               const name = window.prompt('Restricted-zone name', 'Restricted zone');
@@ -220,13 +277,14 @@ function App() {
               setDrawing(false);
             }} />}
             {state?.zones.map(zone => <Polygon key={zone.id} positions={zone.polygon.map((point: Point) => [point.lat, point.lng])}
-              pathOptions={{ color: '#ff626d', fillOpacity: 0.16 }} />)}
+              pathOptions={{ color: selectedZoneId === zone.id ? '#ff8a91' : '#ff626d', fillOpacity: 0.16, weight: selectedZoneId === zone.id ? 4 : 2 }}
+              eventHandlers={{ click: () => { if (role === 'COMMAND') setSelectedZoneId(zone.id); } }} />)}
             {playbackShips.map(ship => <Marker key={ship.id} position={[ship.latitude, ship.longitude]}
               icon={shipIcon(ship, selectedShip?.id === ship.id)}
-              eventHandlers={{ click: () => setSelectedId(ship.id), mouseover: () => setHoveredId(ship.id), mouseout: () => setHoveredId(null) }}>
+              eventHandlers={{ click: () => { if (role === 'COMMAND' || ship.id === captain) setSelectedId(ship.id); }, mouseover: () => setHoveredId(ship.id), mouseout: () => setHoveredId(null) }}>
               <Tooltip className="ship-tooltip-wrap" direction="top" offset={[0, -13]} opacity={1}>
                 <div className="ship-tooltip"><strong>{ship.name}</strong><span>{ship.status.replaceAll('_', ' ')}</span>
-                  <small>{ship.latitude.toFixed(4)}°, {ship.longitude.toFixed(4)}° · {ship.speed.toFixed(1)} kn</small></div>
+                  <small>{ship.latitude.toFixed(4)}°, {ship.longitude.toFixed(4)}° · {(ship.speed / 1.852).toFixed(1)} kn</small></div>
               </Tooltip>
             </Marker>)}
             {selectedShip && selectedShip.route.length > 0 && <Polyline positions={selectedShip.route.map(point => [point.lat, point.lng])}
@@ -240,6 +298,11 @@ function App() {
           {role === 'COMMAND' && <button className={`map-action${drawing ? ' cancel' : ''}`} onClick={startDrawing}>
             {drawing ? <X size={14} /> : <MapPin size={14} />}{drawing ? 'CANCEL ZONE' : 'DRAW RESTRICTED ZONE'}
           </button>}
+          {selectedZone && role === 'COMMAND' && <>
+            <button className="map-action zone-edit" onClick={() => editZone(selectedZone)}>EDIT: {selectedZone.name}</button>
+            <button className="map-action zone-delete" onClick={() => deleteZone(selectedZone)}>DELETE ZONE</button>
+            <button className="map-action" aria-label="Deselect zone" onClick={() => setSelectedZoneId(null)}><X size={13} /></button>
+          </>}
           <span className="weather-state"><CloudLightning size={14} />{state?.weatherFallback ? 'SYNTHETIC WEATHER' : 'LIVE WEATHER'}</span>
         </div>
 
@@ -265,7 +328,7 @@ function App() {
         </div>
 
         {detailShip && <ShipCard ship={detailShip} command={role === 'COMMAND'} directive={() => issueDirective(detailShip)} />}
-        {role === 'CAPTAIN' && selectedShip?.pendingDirective && <CaptainCard ship={selectedShip}
+        {role === 'CAPTAIN' && selectedShip?.pendingDirective && <CaptainCard ship={selectedShip} disabled={!sessionReady}
           respond={(response, payload) => emit('directive:respond', { shipId: selectedShip.id, response, payload })} />}
         <div className="panel-footnote"><ScanLine size={13} /> TELEMETRY STREAM ACTIVE</div>
       </aside>
@@ -275,11 +338,11 @@ function App() {
       <div><span className={socket?.connected ? 'connection-light' : 'connection-light offline'} />
         {socket?.connected ? 'SYSTEMS CONNECTED' : 'CONNECTING TO FLEET'} <i />
         {state?.weatherFallback ? 'WEATHER FALLBACK' : 'WEATHER NOMINAL'}</div>
-      <div className="playback-controls"><button aria-label={playback === null ? 'Pause live view' : 'Resume live view'} onClick={() => setPlayback(playback === null ? 0 : null)}>
+      <div className="playback-controls"><button disabled={!historyFrames.length} aria-label={playback === null ? 'Pause live view' : 'Resume live view'} onClick={() => setPlayback(playback === null ? 0 : null)}>
         {playback === null ? <Pause size={13} /> : <Play size={13} />}</button>
-        <input type="range" min="0" max={Math.max(0, history.length - 1)} value={playback ?? Math.max(0, history.length - 1)}
+        <input aria-label="Fleet history playback" disabled={!historyFrames.length} type="range" min="0" max={Math.max(0, historyFrames.length - 1)} value={playback ?? Math.max(0, historyFrames.length - 1)}
           onChange={event => setPlayback(Number(event.target.value))} />
-        <span>{playback === null ? 'LIVE' : 'PLAYBACK'}</span></div>
+        <span>{!historyFrames.length ? 'HISTORY PENDING' : playback === null ? 'LIVE' : 'PLAYBACK'}</span></div>
     </footer>
     {toast && <button className="toast" onClick={() => setToast('')}>{toast}</button>}
   </div>;
@@ -290,26 +353,29 @@ function Metric({ number, label }: { number: number; label: string }) {
 }
 
 function ShipCard({ ship, command, directive }: { ship: ShipData; command: boolean; directive: () => void }) {
+  const fuelPercent = Math.max(0, Math.min(100, ship.fuel / ship.fuelCapacityTons * 100));
   return <section className="vessel-card">
     <div className="vessel-card-heading"><span><ShipIcon size={14} /> VESSEL TELEMETRY</span><b style={{ color: statusColors[ship.status] || '#46e6a5' }}>{ship.status.replaceAll('_', ' ')}</b></div>
     <h2>{ship.name}</h2>
     <div className="vessel-coordinates">{coordinate(ship.latitude, 'lat')} <span>/</span> {coordinate(ship.longitude, 'lng')}</div>
-    <div className="fuel-meter"><div><span>FUEL</span><b>{ship.fuel.toFixed(1)}%</b></div><i><b style={{ width: `${Math.max(0, Math.min(100, ship.fuel))}%` }} /></i></div>
+    <div className="fuel-meter"><div><span>FUEL · {ship.fuel.toFixed(0)} t</span><b>{fuelPercent.toFixed(1)}%</b></div><i><b style={{ width: `${fuelPercent}%` }} /></i></div>
     <dl className="vessel-stats">
-      <div><dt>SPEED</dt><dd>{ship.speed.toFixed(1)} kn</dd></div><div><dt>HEADING</dt><dd>{ship.heading.toFixed(0)}°</dd></div>
+      <div><dt>SPEED</dt><dd>{(ship.speed / 1.852).toFixed(1)} kn</dd></div><div><dt>HEADING</dt><dd>{ship.heading.toFixed(0)}°</dd></div>
       <div><dt>DESTINATION</dt><dd>{ship.destination.name}</dd></div><div><dt>CARGO</dt><dd>{ship.cargo.type}</dd></div>
     </dl>
     {command && <button className="directive-button" onClick={directive}>ISSUE DIRECTIVE <ChevronRight size={14} /></button>}
   </section>;
 }
 
-function CaptainCard({ ship, respond }: { ship: ShipData; respond: (response: string, payload: any) => void }) {
+function CaptainCard({ ship, respond, disabled }: { ship: ShipData; respond: (response: string, payload: any) => void; disabled: boolean }) {
   const [message, setMessage] = useState('');
   return <section className="captain-directive"><b>NEW DIRECTIVE · {ship.pendingDirective.type}</b>
     <p>Command has issued a course instruction for this vessel.</p>
-    <button onClick={() => respond('ACCEPT', ship.pendingDirective.payload)}>ACCEPT</button>
+    {!disabled && <p className="captain-assignment">ASSIGNED TO {ship.name.toUpperCase()}</p>}
+    {disabled && <p className="captain-assignment">CONNECTING CAPTAIN SESSION…</p>}
+    <button disabled={disabled} onClick={() => respond('ACCEPT', ship.pendingDirective.payload)}>ACCEPT</button>
     <textarea value={message} onChange={event => setMessage(event.target.value)} placeholder="Distress details if you cannot comply" />
-    <button className="escalate" onClick={() => respond('ESCALATE_DISTRESS', { message })}>ESCALATE DISTRESS</button>
+    <button className="escalate" disabled={disabled} onClick={() => respond('ESCALATE_DISTRESS', { message })}>ESCALATE DISTRESS</button>
   </section>;
 }
 

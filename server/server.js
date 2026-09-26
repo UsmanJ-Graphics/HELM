@@ -1,7 +1,7 @@
 const path = require('path');
 const express = require('express');
 const { WebSocketServer } = require('ws');
-const fleetData = require('./fleet.json');
+const fleetData = require('./fleet-adapter.cjs')(require('./fleet.json'));
 const { WeatherService } = require('./weather');
 const { Simulation, TICK_HZ } = require('./simulation');
 

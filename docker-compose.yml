@@ -21,7 +21,7 @@ services:
       SIMULATION_TICK_MS: ${SIMULATION_TICK_MS:-1000}
       OPEN_METEO_BASE_URL: ${OPEN_METEO_BASE_URL:-https://api.open-meteo.com/v1/forecast}
       AI_API_KEY: ${AI_API_KEY:-}
-      AI_MODEL: ${AI_MODEL:-local-fallback}
+      AI_MODEL: ${AI_MODEL:-gpt-4o-mini}
       CLIENT_URL: http://localhost:5173
     ports: ["3001:3001"]
     depends_on:

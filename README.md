@@ -1,50 +1,65 @@
 # HELM — Maritime Crisis Operations
 
-HELM is a real-time command system for the 15 ships supplied in `server/fleet.json`. It provides Command and ship-scoped Captain dashboards, continuous simulation, restricted-zone controls, alerts, weather-aware fuel consumption, route updates, and one-hour playback.
+HELM is a real-time fleet command simulator for the Code Rush Strait of Hormuz scenario. It loads the supplied 15-vessel fleet, gives Command and ship-scoped Captain views, and streams simulated vessel state over Socket.IO.
 
-## Run
+## Run with Docker
 
 ```bash
 docker compose up --build
 ```
 
-Open `http://localhost:5173`. Command is the default role; choose Captain and a vessel to demonstrate captain-scoped directives. PostgreSQL is exposed on 5432 and the API on 3001. Copy `.env.example` to `.env` to customize the defaults.
+Open <http://localhost:5173>. The frontend, Node backend, and PostgreSQL/PostGIS database start together. Copy `.env.example` to `.env` to override defaults.
 
-## Architecture
+## Run locally
 
-The React/TypeScript client receives authoritative `fleet:state` Socket.IO events from the Node/TypeScript backend. The in-memory `FleetEngine` ticks at `SIMULATION_TICK_MS` (1 second by default); PostgreSQL is deliberately outside the tick path. The backend persists zones, alerts, directives/events, and 30-second ship snapshots to PostgreSQL/PostGIS.
+The backend requires PostgreSQL with PostGIS enabled. Create a database named `helm`, install PostGIS for that PostgreSQL version, then use two terminals:
 
+```powershell
+# Terminal 1 — backend
+cd backend
+$env:DATABASE_URL = "postgresql://postgres:YOUR_PASSWORD@localhost:5432/helm"
+npm run dev
 ```
-React + Leaflet ── Socket.IO ── FleetEngine / AlertEngine / Routing ── PostgreSQL + PostGIS
+
+```powershell
+# Terminal 2 — frontend
+cd frontend
+npm run dev
 ```
 
-`backend/src/schema.ts` defines ships, restricted_zones, ship_routes, directives, alerts, distress_events, ship_snapshots, weather_snapshots, and system_events. Zone geometry uses a PostGIS GIST index; alerts and snapshots have operational indexes.
+Open <http://localhost:5173>. Replace `YOUR_PASSWORD` with the password for your local PostgreSQL user.
+
+## Supplied fleet data and assumptions
+
+`server/fleet.json` preserves the original Code Rush fleet file: scenario metadata, its bounding box and navigable-water polygon, ten ports, and all 15 named vessels. `backend/src/fleet.ts` adapts it to the simulation model:
+
+- The supplied coordinates are `[lat, lng]`; the routing geometry is converted to GeoJSON `[lng, lat]`.
+- Source speeds are knots; the simulator uses km/h internally and the UI displays knots.
+- Source fuel is in tons. The assignment does not provide tank capacities, so the demo assumes a 10,000-ton full tank for percentage and range estimates.
+- Port destinations are resolved by ID. Routes terminate at the nearest navigable-water approach point instead of plotting the vessel onto an inland port coordinate.
+
+The provided water polygon is a simplified operational boundary, not a detailed coastline chart. Route segments are checked against that polygon and active restricted zones, but the simulator cannot guarantee a ship stays clear of every real-world shoreline feature outside the supplied geometry.
 
 ## Behavior
 
-- Exactly 15 ships load from the supplied `fleet.json`; the backend owns their position, heading, route, fuel, weather, and status.
-- Every tick moves ships, applies the 1.30 adverse-weather fuel multiplier, checks arrival/fuel/zone/proximity conditions, saves snapshots, and broadcasts state.
-- Command-only Socket.IO events create, update, and delete zones and issue directives. Captains are validated server-side against one assigned ship before responding.
-- New zones trigger geofence events for ships already inside and recalculate intersecting routes. Proximity alerts activate at 2 km and resolve after 2.25 km.
-- `WeatherService` caches Open-Meteo conditions and has a visibly marked deterministic fallback for offline judging.
-- Distress messages use deterministic structured extraction without an AI key, producing severity, issue, injuries, cargo damage, and assistance need. An external model can be placed behind that validated result boundary.
-- The glass command center has browser-audio high/critical alerts after user interaction, status-coloured ship markers, route display, command cards, alert acknowledgement, and a playback scrubber.
+- Exactly 15 source vessels are loaded. The authoritative simulation ticks at 1 Hz by default and broadcasts state to all connected clients.
+- Movement is interpolated in the browser between server updates. Ship list and map selection focus the map on the chosen vessel; hovering shows vessel telemetry and live coordinates.
+- Command can draw restricted zones and select an existing zone to edit or delete it. Captains can view zones and respond only for the vessel assigned to their current session.
+- Geofence alerts are checked each tick, and drawing a zone around a ship already inside it produces an immediate alert. Alerts remain active until acknowledged; acknowledgements leave the active-alert list.
+- Proximity warnings activate below 2 km and resolve above 2.25 km.
+- Adverse wind applies a 30% fuel penalty. Open-Meteo forecasts are fetched in a batched request for fleet and destination locations; a marked deterministic fallback is used offline. Route cost and fuel reachability estimates use the current spatial samples.
+- Captain distress text is sent to OpenAI when `AI_API_KEY` is configured and validated against a structured schema. If no key is configured or the request fails, a local deterministic parser keeps the workflow available.
+- PostgreSQL/PostGIS persists zones, routes, directives, alerts, weather samples, events, and 30-second ship snapshots. The playback slider groups those snapshots into times for the last-hour timeline.
+- The map offers 2D and perspective-tilt modes. The 3D option is a tilted view of the 2D basemap, not a globe or terrain rendering.
 
 ## Environment
 
-See `.env.example`. `DATABASE_URL`, `OPEN_METEO_BASE_URL`, `AI_API_KEY`, `AI_MODEL`, `SIMULATION_TICK_MS`, `PORT`, and `CLIENT_URL` are configurable. AI is optional and its credentials never reach the browser.
+See `.env.example` for `DATABASE_URL`, `OPEN_METEO_BASE_URL`, `AI_API_KEY`, `AI_MODEL`, `SIMULATION_TICK_MS`, `PORT`, and `CLIENT_URL`. AI is optional; its API key is used only by the backend.
 
 ## Tests
 
 ```bash
 cd backend
-npm install
 npm test -- --cache=false
 npx tsc --noEmit
 ```
-
-The engine tests verify the 15-vessel source, immediate geofence handling, and directive acceptance.
-
-## Assumptions
-
-The supplied operational-water polygon and some supplied destination ports do not fully align. HELM treats each supplied port as the terminal target and marks a vessel that begins outside navigable water as stranded. Its route planner uses safe segment detours around active restricted polygons and is structured for replacement with a denser A* water grid if tighter coastline behavior is needed. OpenStreetMap tiles need internet access; weather has the documented local fallback.

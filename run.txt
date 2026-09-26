@@ -1,0 +1,7 @@
+ cd D:\coderush-fleet-command\coderush\backend
+>> $env:DATABASE_URL = "postgresql://postgres:1234@localhost:5432/helm"
+>> npm run dev
+
+
+ cd D:\coderush-fleet-command\coderush\frontend
+>> npm run dev

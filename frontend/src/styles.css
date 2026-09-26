@@ -73,6 +73,8 @@ button { color: inherit; }
 .map-action { border-color: #344c38; color: var(--green); cursor: pointer; }
 .map-action:hover { border-color: #46e6a5aa; background: #10251a; }
 .map-action.cancel { color: #ff8188; }
+.map-action.zone-edit { color: #b6e78f; }
+.map-action.zone-delete { border-color: #713b3f; color: #ff8a91; }
 .weather-state { border-color: #27392d; color: #a4b5a9; }
 .weather-state svg { color: #a4cb82; }
 .map-readout { position: absolute; z-index: 600; top: 14px; right: 14px; display: flex; align-items: center; gap: 12px; min-height: 45px; padding: 6px 11px; border: 1px solid #30483a; background: rgba(7, 16, 13, .94); box-shadow: 0 8px 24px #0004; }
@@ -136,6 +138,8 @@ button { color: inherit; }
 .captain-directive > b { color: #f6d57f; font: 8px var(--mono); }
 .captain-directive p { color: #c5b98d; line-height: 1.45; }
 .captain-directive button { width: 100%; margin: 4px 0 8px; padding: 8px; border: 1px solid #537a4b; background: #17321d; color: #a9e89c; cursor: pointer; font: 8px var(--mono); }
+.captain-directive button:disabled { border-color: #344438; background: #131c15; color: #718176; cursor: wait; }
+.captain-assignment { color: #8fc99b !important; font: 8px var(--mono); letter-spacing: .04em; }
 .captain-directive button.escalate { border-color: #85393d; background: #381719; color: #ffabb0; }
 .captain-directive textarea { width: 100%; min-height: 54px; padding: 8px; border: 1px solid #493d20; background: #100f0a; color: #e4e0d3; resize: vertical; }
 .panel-footnote { display: flex; align-items: center; gap: 7px; margin: auto 12px 10px; padding-top: 12px; border-top: 1px solid var(--line); color: #64796b; font: 7px var(--mono); letter-spacing: .06em; }
@@ -147,6 +151,7 @@ button { color: inherit; }
 .connection-light.offline { background: #e1ab48; box-shadow: 0 0 7px #e1ab4877; }
 .playback-controls { display: flex; align-items: center; gap: 8px; }
 .playback-controls button { display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--green); cursor: pointer; }
+.playback-controls button:disabled, .playback-controls input:disabled { opacity: .4; cursor: not-allowed; }
 .playback-controls input { width: min(220px, 24vw); accent-color: var(--green); }
 .playback-controls span { color: var(--green); }
 .toast { position: fixed; z-index: 1000; right: 20px; bottom: 54px; max-width: 390px; padding: 12px 15px; border: 1px solid #43815b; background: #0e2317; color: #d8e8df; text-align: left; box-shadow: 0 12px 30px #0009; cursor: pointer; }
