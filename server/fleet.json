@@ -1,0 +1,383 @@
+{
+  "bbox": {
+    "minLat": 24.3,
+    "maxLat": 27.5,
+    "minLng": 53.8,
+    "maxLng": 58.5
+  },
+  "navigablePolygon": [
+    [
+      54.0,
+      27.4
+    ],
+    [
+      56.2,
+      27.3
+    ],
+    [
+      56.5,
+      26.6
+    ],
+    [
+      56.9,
+      26.2
+    ],
+    [
+      57.3,
+      25.9
+    ],
+    [
+      58.4,
+      25.3
+    ],
+    [
+      58.4,
+      24.3
+    ],
+    [
+      57.8,
+      24.2
+    ],
+    [
+      57.0,
+      24.6
+    ],
+    [
+      56.4,
+      24.9
+    ],
+    [
+      56.0,
+      25.2
+    ],
+    [
+      55.5,
+      25.4
+    ],
+    [
+      54.0,
+      25.5
+    ],
+    [
+      54.0,
+      27.4
+    ]
+  ],
+  "ships": [
+    {
+      "id": "ship-01",
+      "name": "MV Horizon Star",
+      "lat": 26.2625,
+      "lng": 54.2025,
+      "speed": 21.4,
+      "heading": 88.2,
+      "destination": {
+        "name": "Kuwait Port",
+        "lat": 29.3759,
+        "lng": 47.9774
+      },
+      "fuel": 87.1,
+      "fuelCapacity": 100.0,
+      "cargo": {
+        "type": "LNG",
+        "amount": 3956
+      },
+      "status": "normal",
+      "path": []
+    },
+    {
+      "id": "ship-02",
+      "name": "MV Gulf Pioneer",
+      "lat": 24.6826,
+      "lng": 54.4842,
+      "speed": 19.6,
+      "heading": 181.9,
+      "destination": {
+        "name": "Khasab",
+        "lat": 26.1833,
+        "lng": 56.25
+      },
+      "fuel": 88.6,
+      "fuelCapacity": 100.0,
+      "cargo": {
+        "type": "Chemicals",
+        "amount": 2305
+      },
+      "status": "normal",
+      "path": []
+    },
+    {
+      "id": "ship-03",
+      "name": "MV Amber Voyager",
+      "lat": 25.7679,
+      "lng": 55.2406,
+      "speed": 21.0,
+      "heading": 273.2,
+      "destination": {
+        "name": "Jebel Ali",
+        "lat": 25.0119,
+        "lng": 55.0617
+      },
+      "fuel": 73.6,
+      "fuelCapacity": 100.0,
+      "cargo": {
+        "type": "Containers",
+        "amount": 2263
+      },
+      "status": "normal",
+      "path": []
+    },
+    {
+      "id": "ship-04",
+      "name": "MT Crimson Tide",
+      "lat": 27.0888,
+      "lng": 55.48,
+      "speed": 22.5,
+      "heading": 136.8,
+      "destination": {
+        "name": "Bandar Abbas",
+        "lat": 27.1865,
+        "lng": 56.2808
+      },
+      "fuel": 84.1,
+      "fuelCapacity": 100.0,
+      "cargo": {
+        "type": "Crude Oil",
+        "amount": 4263
+      },
+      "status": "normal",
+      "path": []
+    },
+    {
+      "id": "ship-05",
+      "name": "MT Northern Light",
+      "lat": 25.9942,
+      "lng": 58.0898,
+      "speed": 22.3,
+      "heading": 28.4,
+      "destination": {
+        "name": "Muscat",
+        "lat": 23.6139,
+        "lng": 58.5922
+      },
+      "fuel": 84.7,
+      "fuelCapacity": 100.0,
+      "cargo": {
+        "type": "Refined Fuel",
+        "amount": 2075
+      },
+      "status": "normal",
+      "path": []
+    },
+    {
+      "id": "ship-06",
+      "name": "MV Silver Falcon",
+      "lat": 26.4319,
+      "lng": 54.2879,
+      "speed": 22.6,
+      "heading": 278.3,
+      "destination": {
+        "name": "Khasab",
+        "lat": 26.1833,
+        "lng": 56.25
+      },
+      "fuel": 94.7,
+      "fuelCapacity": 100.0,
+      "cargo": {
+        "type": "Chemicals",
+        "amount": 2777
+      },
+      "status": "normal",
+      "path": []
+    },
+    {
+      "id": "ship-07",
+      "name": "MV Ocean Sentinel",
+      "lat": 25.7789,
+      "lng": 57.5199,
+      "speed": 20.7,
+      "heading": 133.3,
+      "destination": {
+        "name": "Fujairah",
+        "lat": 25.1288,
+        "lng": 56.3265
+      },
+      "fuel": 88.1,
+      "fuelCapacity": 100.0,
+      "cargo": {
+        "type": "LNG",
+        "amount": 1901
+      },
+      "status": "normal",
+      "path": []
+    },
+    {
+      "id": "ship-08",
+      "name": "SS Desert Rose",
+      "lat": 25.9888,
+      "lng": 55.1037,
+      "speed": 20.9,
+      "heading": 136.6,
+      "destination": {
+        "name": "Dammam",
+        "lat": 26.4207,
+        "lng": 50.1063
+      },
+      "fuel": 68.8,
+      "fuelCapacity": 100.0,
+      "cargo": {
+        "type": "Refined Fuel",
+        "amount": 958
+      },
+      "status": "normal",
+      "path": []
+    },
+    {
+      "id": "ship-09",
+      "name": "MV Pearl Trader",
+      "lat": 25.1955,
+      "lng": 54.2316,
+      "speed": 16.1,
+      "heading": 144.4,
+      "destination": {
+        "name": "Doha Port",
+        "lat": 25.2769,
+        "lng": 51.6
+      },
+      "fuel": 97.7,
+      "fuelCapacity": 100.0,
+      "cargo": {
+        "type": "Refined Fuel",
+        "amount": 2241
+      },
+      "status": "normal",
+      "path": []
+    },
+    {
+      "id": "ship-10",
+      "name": "MV Azure Current",
+      "lat": 26.3041,
+      "lng": 55.7221,
+      "speed": 16.5,
+      "heading": 51.4,
+      "destination": {
+        "name": "Dammam",
+        "lat": 26.4207,
+        "lng": 50.1063
+      },
+      "fuel": 82.5,
+      "fuelCapacity": 100.0,
+      "cargo": {
+        "type": "Grain",
+        "amount": 4009
+      },
+      "status": "normal",
+      "path": []
+    },
+    {
+      "id": "ship-11",
+      "name": "MV Ironclad",
+      "lat": 26.9343,
+      "lng": 55.7375,
+      "speed": 19.1,
+      "heading": 359.0,
+      "destination": {
+        "name": "Khasab",
+        "lat": 26.1833,
+        "lng": 56.25
+      },
+      "fuel": 63.6,
+      "fuelCapacity": 100.0,
+      "cargo": {
+        "type": "Crude Oil",
+        "amount": 1398
+      },
+      "status": "normal",
+      "path": []
+    },
+    {
+      "id": "ship-12",
+      "name": "MT Meridian Wave",
+      "lat": 24.9974,
+      "lng": 54.7559,
+      "speed": 17.8,
+      "heading": 214.7,
+      "destination": {
+        "name": "Muscat",
+        "lat": 23.6139,
+        "lng": 58.5922
+      },
+      "fuel": 99.8,
+      "fuelCapacity": 100.0,
+      "cargo": {
+        "type": "Grain",
+        "amount": 594
+      },
+      "status": "normal",
+      "path": []
+    },
+    {
+      "id": "ship-13",
+      "name": "MT Solstice Bay",
+      "lat": 26.3687,
+      "lng": 54.5697,
+      "speed": 15.1,
+      "heading": 276.7,
+      "destination": {
+        "name": "Kuwait Port",
+        "lat": 29.3759,
+        "lng": 47.9774
+      },
+      "fuel": 77.4,
+      "fuelCapacity": 100.0,
+      "cargo": {
+        "type": "Vehicles",
+        "amount": 526
+      },
+      "status": "normal",
+      "path": []
+    },
+    {
+      "id": "ship-14",
+      "name": "MV Coral Horizon",
+      "lat": 27.0799,
+      "lng": 57.691,
+      "speed": 19.1,
+      "heading": 349.9,
+      "destination": {
+        "name": "Kuwait Port",
+        "lat": 29.3759,
+        "lng": 47.9774
+      },
+      "fuel": 64.3,
+      "fuelCapacity": 100.0,
+      "cargo": {
+        "type": "Grain",
+        "amount": 4658
+      },
+      "status": "normal",
+      "path": []
+    },
+    {
+      "id": "ship-15",
+      "name": "SS Zenith Runner",
+      "lat": 26.1833,
+      "lng": 54.7266,
+      "speed": 23.2,
+      "heading": 194.2,
+      "destination": {
+        "name": "Fujairah",
+        "lat": 25.1288,
+        "lng": 56.3265
+      },
+      "fuel": 84.0,
+      "fuelCapacity": 100.0,
+      "cargo": {
+        "type": "Vehicles",
+        "amount": 659
+      },
+      "status": "normal",
+      "path": []
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HELM — Strait of Hormuz Fleet Command</title>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="app">
+
+  <header id="topbar">
+    <div class="brand">
+      <span class="brand-mark">⌁</span>
+      <div class="brand-text">
+        <div class="brand-name">HELM</div>
+        <div class="brand-sub">Strait of Hormuz — Fleet Command</div>
+      </div>
+    </div>
+
+    <div class="role-switch" id="roleSwitch">
+      <button class="role-btn active" data-role="command">Command</button>
+      <button class="role-btn" data-role="captain">Captain</button>
+      <select id="captainShipSelect" class="ship-select hidden"></select>
+    </div>
+
+    <div class="topbar-right">
+      <div class="stat" id="clockStat"><span class="stat-label">Sim Clock</span><span class="stat-value" id="clockValue">--:--:--</span></div>
+      <div class="stat" id="shipCountStat"><span class="stat-label">Ships</span><span class="stat-value">15</span></div>
+      <div id="connBadge" class="badge disconnected">Connecting…</div>
+    </div>
+  </header>
+
+  <main id="layout">
+
+    <section id="mapPane">
+      <div id="map"></div>
+      <div id="mapToolbar" class="hidden">
+        <button id="drawZoneBtn" class="tool-btn">Draw Restricted Zone</button>
+        <span id="drawHint" class="tool-hint hidden">Click points on the map, double-click to finish.</span>
+      </div>
+      <div id="weatherBadge" class="weather-badge hidden">⛆ synthetic weather (offline fallback)</div>
+    </section>
+
+    <aside id="sidebar">
+
+      <div class="panel" id="captainPanel">
+        <!-- populated by app.js when role=captain -->
+      </div>
+
+      <div class="panel" id="shipDetailPanel">
+        <div class="panel-title">Ship Detail</div>
+        <div class="panel-body muted">Click a ship on the map for details.</div>
+      </div>
+
+      <div class="panel" id="alertsPanel">
+        <div class="panel-title">Alerts <span id="alertCount" class="pill">0</span></div>
+        <div class="panel-body" id="alertsList"></div>
+      </div>
+
+      <div class="panel" id="timelinePanel">
+        <div class="panel-title">Playback <span class="panel-sub">last hour · 30s resolution</span></div>
+        <div class="panel-body">
+          <input type="range" id="timelineSlider" min="0" max="0" value="0" step="1" />
+          <div class="timeline-row">
+            <span id="timelineLabel" class="muted small">Live</span>
+            <button id="timelineLiveBtn" class="tool-btn small">Return to Live</button>
+          </div>
+        </div>
+      </div>
+
+    </aside>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
