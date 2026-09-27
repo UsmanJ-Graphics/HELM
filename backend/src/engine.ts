@@ -72,9 +72,21 @@ export class WeatherService {
 
 export class FleetEngine {
   ships:Ship[]; zones:Zone[]=[]; alerts:Alert[]=[]; events:any[]=[]; readonly water:any; readonly bbox:any; weather=new WeatherService();
-  constructor(fleet:any,options:{deferRoutes?:boolean}={}) { this.bbox=fleet.bbox;this.water=turf.polygon([fleet.navigablePolygon]); this.ships=fleet.ships.map((s:any)=>({id:s.id,name:s.name,latitude:s.lat,longitude:s.lng,speed:s.speed,heading:s.heading,destination:s.destination,fuel:s.fuel,fuelCapacityTons:s.fuelCapacityTons||10_000,cargo:s.cargo,status:'NORMAL',route:[],routeIndex:1,weather:{},lastUpdate:Date.now()})); if(!options.deferRoutes)this.ships.forEach(s=>this.route(s)); }
-  async initialize(){await this.weather.refresh(this.bbox,this.ships);this.ships.forEach(s=>this.route(s));}
+  constructor(fleet:any,options:{deferRoutes?:boolean}={}) { this.bbox=fleet.bbox;const polygons=fleet.navigablePolygons||[fleet.navigablePolygon];this.water=turf.multiPolygon(polygons.map((ring:any)=>[ring])); this.ships=fleet.ships.map((s:any)=>({id:s.id,name:s.name,latitude:s.lat,longitude:s.lng,speed:s.speed,heading:s.heading,destination:s.destination,fuel:s.fuel,fuelCapacityTons:s.fuelCapacityTons||10_000,cargo:s.cargo,status:'NORMAL',route:[],routeIndex:1,weather:{},lastUpdate:Date.now()})); if(!options.deferRoutes)this.ships.forEach(s=>this.route(s)); }
+  async initialize(){await this.weather.refresh(this.bbox,this.ships);this.zones.forEach(zone=>this.syncZone(zone));this.ships.forEach(s=>this.route(s));}
   private pos(s:Ship):LngLat { return {lat:s.latitude,lng:s.longitude}; }
+  private syncZoneShip(ship:Ship,zone:Zone) {
+    const polygon=turf.polygon([[...zone.polygon.map(p=>[p.lng,p.lat]),[zone.polygon[0].lng,zone.polygon[0].lat]]]);
+    const inside=turf.booleanPointInPolygon(point(this.pos(ship)),polygon);
+    const existing=this.alerts.find(a=>a.type==='GEOFENCE_BREACH'&&a.shipId===ship.id&&a.metadata?.zoneId===zone.id&&a.status!=='RESOLVED');
+    if(inside)this.alert('GEOFENCE_BREACH','HIGH',ship.id,`${ship.name} is inside ${zone.name}`,{zoneId:zone.id});
+    else if(existing)existing.status='RESOLVED';
+    return inside;
+  }
+  private syncZone(zone:Zone) { this.ships.forEach(ship=>this.syncZoneShip(ship,zone)); }
+  private clearZoneAlerts(zoneId:string) {
+    this.alerts.forEach(alert=>{if(alert.type==='GEOFENCE_BREACH'&&alert.metadata?.zoneId===zoneId&&alert.status!=='RESOLVED')alert.status='RESOLVED';});
+  }
   private alert(type:string,severity:Alert['severity'],shipId:string|null,message:string,metadata={}) { const existing=this.alerts.find(a=>a.type===type&&a.shipId===shipId&&a.status!=='RESOLVED'&&JSON.stringify(a.metadata)===JSON.stringify(metadata)); if(existing)return existing; const a={id:id('alert'),type,severity,shipId,message,metadata,status:'ACTIVE' as const,createdAt:Date.now()};this.alerts.unshift(a);this.events.unshift({type,shipId,at:Date.now(),payload:a});return a; }
   private safeSegment(a:LngLat,b:LngLat,restricted:any[]) {
     const samples=Math.max(1,Math.ceil(km(a,b)/3));
@@ -96,7 +108,7 @@ export class FleetEngine {
     }
     const nearest=(p:LngLat)=>{let found:string|undefined,best=Infinity;for(const [k,n] of nodes){const distance=km(p,n.p);if(distance<best){best=distance;found=k;}}return found;};
     const source=nearest(start),target=nearest(end);
-    if(!source||!target){s.status='STRANDED';this.alert('STRANDED','CRITICAL',s.id,`${s.name} has no navigable path to ${s.destination.name}`);return;}
+    if(!source||!target){s.status='STRANDED';const area=this.zones.length?'the navigable area and active restricted zones':'the supplied navigable-water boundary';this.alert('STRANDED','CRITICAL',s.id,`${s.name} has no safe route to ${s.destination.name} within ${area}`);return;}
     const sourcePoint=nodes.get(source)!.p;
     const startInsideZone=restricted.some(zone=>turf.booleanPointInPolygon(point(start),zone));
     if(!turf.booleanPointInPolygon(point(start),this.water)||(!startInsideZone&&!this.safeSegment(start,sourcePoint,restricted))){
@@ -120,16 +132,40 @@ export class FleetEngine {
         }
       }
     }
-    if(source!==target&&!from.has(target)){s.status='STRANDED';this.alert('STRANDED','CRITICAL',s.id,`${s.name} is boxed in by land or restricted zones`);return;}
+    if(source!==target&&!from.has(target)){s.status='STRANDED';const area=this.zones.length?'the navigable area and active restricted zones':'the supplied navigable-water boundary';this.alert('STRANDED','CRITICAL',s.id,`${s.name} has no safe route to ${s.destination.name} within ${area}`);return;}
     const grid:LngLat[]=[];let cursor=target;grid.unshift(nodes.get(cursor)!.p);while(from.has(cursor)){cursor=from.get(cursor)!;grid.unshift(nodes.get(cursor)!.p);}
     // End at the nearest navigable approach point; don't animate a ship onto a land port coordinate.
     s.route=[start,...grid.filter(p=>km(p,start)>.01)];s.routeIndex=s.route.length>1?1:0;
     // A newly valid route after editing/removing a zone makes a stranded ship mobile again.
     if(s.status==='STRANDED')s.status='NORMAL';
+    this.alerts.forEach(alert=>{if(alert.type==='STRANDED'&&alert.shipId===s.id&&alert.status==='ACTIVE')alert.status='RESOLVED';});
   }
-  addZone(polygon:LngLat[],name:string,createdBy:string) { if(polygon.length<3)throw new Error('A zone requires at least 3 points'); const z={id:id('zone'),name,polygon,createdBy,createdAt:Date.now()};this.zones.push(z); const poly=turf.polygon([[...polygon.map(p=>[p.lng,p.lat]),[polygon[0].lng,polygon[0].lat]]]); this.ships.forEach(s=>{const route=s.route.length>1?s.route:[this.pos(s),{lat:s.destination.lat,lng:s.destination.lng}];const line=turf.lineString(route.map(p=>[p.lng,p.lat])); if(turf.booleanPointInPolygon(point(this.pos(s)),poly))this.alert('GEOFENCE_BREACH','HIGH',s.id,`${s.name} is inside ${name}`); if(turf.booleanIntersects(line,poly)){s.status='REROUTING';this.route(s);this.events.unshift({type:'REROUTE',shipId:s.id,at:Date.now(),payload:{zoneId:z.id}});}});return z; }
-  updateZone(zoneId:string,polygon:LngLat[],name:string){const z=this.zones.find(x=>x.id===zoneId);if(!z)throw new Error('Zone not found');z.polygon=polygon;z.name=name;this.ships.forEach(s=>{if(s.status==='STRANDED')s.status='NORMAL';this.route(s);});return z;}
-  deleteZone(zoneId:string){this.zones=this.zones.filter(z=>z.id!==zoneId);this.ships.forEach(s=>{if(s.status==='STRANDED')s.status='NORMAL';this.route(s);});}
+  addZone(polygon:LngLat[],name:string,createdBy:string) {
+    if(polygon.length<3)throw new Error('A zone requires at least 3 points');
+    const z:Zone={id:id('zone'),name,polygon,createdBy,createdAt:Date.now()};
+    this.zones.push(z);
+    this.syncZone(z);
+    const feature=turf.polygon([[...polygon.map(p=>[p.lng,p.lat]),[polygon[0].lng,polygon[0].lat]]]);
+    this.ships.forEach(s=>{
+      const route=s.route.length>1?s.route:[this.pos(s),{lat:s.destination.lat,lng:s.destination.lng}];
+      const line=turf.lineString(route.map(p=>[p.lng,p.lat]));
+      if(turf.booleanIntersects(line,feature)){
+        s.status='REROUTING';this.route(s);
+        this.events.unshift({type:'REROUTE',shipId:s.id,at:Date.now(),payload:{zoneId:z.id}});
+      }
+    });
+    return z;
+  }
+  updateZone(zoneId:string,polygon:LngLat[],name:string){
+    const z=this.zones.find(x=>x.id===zoneId);if(!z)throw new Error('Zone not found');
+    z.polygon=polygon;z.name=name;this.syncZone(z);
+    this.ships.forEach(s=>{if(s.status==='STRANDED')s.status='NORMAL';this.route(s);});
+    return z;
+  }
+  deleteZone(zoneId:string){
+    this.zones=this.zones.filter(z=>z.id!==zoneId);this.clearZoneAlerts(zoneId);
+    this.ships.forEach(s=>{if(s.status==='STRANDED')s.status='NORMAL';this.route(s);});
+  }
   issue(shipId:string,type:Directive['type'],payload:any){const s=this.ship(shipId); const d={id:id('directive'),type,payload,status:'PENDING' as const,createdAt:Date.now()};s.pendingDirective=d;this.events.unshift({type:'DIRECTIVE_CREATED',shipId,at:Date.now(),payload:d});return d;}
   respond(shipId:string,response:'ACCEPT'|'ESCALATE_DISTRESS',payload:any,analysisOverride?:any){const s=this.ship(shipId),d=s.pendingDirective;if(!d)throw new Error('No directive waiting'); if(response==='ACCEPT'){d.status='ACCEPTED';if(d.type==='HOLD')s.status='STOPPED';else {const target=payload.destination||payload.waypoint||d.payload.destination||d.payload.waypoint;if(target)s.destination=target;s.status='REROUTING';this.route(s);}}else {d.status='ESCALATED';s.status='DISTRESSED';const analysis=analysisOverride||distress(payload.message||'');this.alert('DISTRESS',analysis.severity,s.id,`${s.name}: ${analysis.summary}`,analysis);this.events.unshift({type:'DISTRESS',shipId,at:Date.now(),payload:{message:payload.message,analysis}});}s.pendingDirective=undefined;return {ship:s,directive:d};}
   acknowledge(alertId:string){const a=this.alerts.find(x=>x.id===alertId);if(a)a.status='ACKNOWLEDGED';return a;}
@@ -158,7 +194,10 @@ export class FleetEngine {
       if(s.fuel<requiredTons&&s.status!=='INSUFFICIENT_FUEL'){s.status='INSUFFICIENT_FUEL';this.alert('INSUFFICIENT_FUEL','HIGH',s.id,`${s.name} may not reach ${s.destination.name} with its remaining fuel`);}
       else if(s.fuel>=requiredTons&&s.status==='INSUFFICIENT_FUEL')s.status='NORMAL';
       if(s.routeIndex>=s.route.length){s.status='ARRIVED';this.alert('ARRIVAL','INFO',s.id,`${s.name} arrived at ${s.destination.name}`);}
-      for(const zone of this.zones){const polygon=turf.polygon([[...zone.polygon.map(p=>[p.lng,p.lat]),[zone.polygon[0].lng,zone.polygon[0].lat]]]);if(turf.booleanPointInPolygon(point(next),polygon)){this.alert('GEOFENCE_BREACH','HIGH',s.id,`${s.name} entered ${zone.name}`);s.status='REROUTING';this.route(s);}}
+      for(const zone of this.zones){
+        const inside=this.syncZoneShip(s,zone);
+        if(inside&&s.status!=='REROUTING'){s.status='REROUTING';this.route(s);}
+      }
       s.lastUpdate=Date.now();
     }
     this.proximity();

@@ -9,6 +9,13 @@ export class Database {
   async persistDirective(shipId:string,d:any) { await this.pool.query('INSERT INTO directives(id,ship_id,type,payload,status,created_by,responded_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO UPDATE SET status=EXCLUDED.status,responded_at=EXCLUDED.responded_at',[d.id,shipId,d.type,JSON.stringify(d.payload),d.status,'COMMAND',d.status==='PENDING'?null:new Date()]); }
   async event(type: string, shipId: string | null, payload: unknown) { await this.pool.query('INSERT INTO system_events(type,ship_id,payload) VALUES($1,$2,$3)', [type, shipId, payload]); }
   async persistZone(z: any) { const ring = z.polygon.map((p: any) => [p.lng, p.lat]); ring.push(ring[0]); await this.pool.query('INSERT INTO restricted_zones(id,name,geometry,created_by) VALUES($1,$2,ST_GeomFromGeoJSON($3),$4) ON CONFLICT(id) DO UPDATE SET name=$2,geometry=EXCLUDED.geometry,updated_at=now()', [z.id,z.name,JSON.stringify({type:'Polygon',coordinates:[ring]}),z.createdBy]); }
+  async zones() {
+    const result = await this.pool.query('SELECT id,name,ST_AsGeoJSON(geometry)::json AS geometry,created_by,created_at FROM restricted_zones ORDER BY created_at');
+    return result.rows.map((row:any) => ({
+      id:row.id,name:row.name,createdBy:row.created_by,createdAt:new Date(row.created_at).getTime(),
+      polygon:row.geometry.coordinates[0].slice(0,-1).map(([lng,lat]:[number,number])=>({lat,lng})),
+    }));
+  }
   async deleteZone(id: string) { await this.pool.query('DELETE FROM restricted_zones WHERE id=$1',[id]); }
   async persistAlert(a: any) { await this.pool.query('INSERT INTO alerts(id,ship_id,type,severity,title,message,metadata,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO UPDATE SET status=EXCLUDED.status,acknowledged_at=CASE WHEN EXCLUDED.status=\'ACKNOWLEDGED\' THEN now() ELSE alerts.acknowledged_at END,resolved_at=CASE WHEN EXCLUDED.status=\'RESOLVED\' THEN now() ELSE alerts.resolved_at END',[a.id,a.shipId,a.type,a.severity,a.type.replaceAll('_',' '),a.message,JSON.stringify(a.metadata),a.status]); }
   async distress(shipId:string,message:string,analysis:any) { await this.pool.query('INSERT INTO distress_events(id,ship_id,message,severity,issue,injury_count,damage_estimate,ai_analysis) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [`distress_${crypto.randomUUID()}`,shipId,message,analysis.severity,analysis.issue,analysis.injuryCount,null,JSON.stringify(analysis)]); }

@@ -16,9 +16,12 @@ type ShipData = {
   destination: { name: string; lat: number; lng: number }; fuel: number; fuelCapacityTons: number; cargo: { type: string };
   status: string; route: Point[]; weather: any; pendingDirective?: any;
 };
-type AlertData = { id: string; type: string; severity: string; shipId: string | null; message: string; status: string; createdAt: number };
+type AlertData = { id: string; type: string; severity: string; shipId: string | null; message: string; status: string; createdAt: number; metadata?: any };
 type FleetState = { ships: ShipData[]; zones: any[]; alerts: AlertData[]; events: any[]; weatherFallback: boolean };
+type AccessConfig = { command: boolean; captainShipIds: string[] };
+type VesselOption = { id: string; name: string };
 type ViewMode = '2D' | '3D';
+type FleetFilter = 'ALL' | 'NORMAL' | 'REROUTING' | 'ALERTS';
 
 const apiUrl = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
 const statusColors: Record<string, string> = {
@@ -88,8 +91,13 @@ function App() {
   const [visualShips, setVisualShips] = useState<ShipData[]>([]);
   const [role, setRole] = useState<'COMMAND' | 'CAPTAIN'>('COMMAND');
   const [captain, setCaptain] = useState('MV-1');
+  const [accessConfig, setAccessConfig] = useState<AccessConfig>({ command: false, captainShipIds: [] });
+  const [vesselRoster, setVesselRoster] = useState<VesselOption[]>([]);
+  const [accessCode, setAccessCode] = useState('');
+  const [authSubmitted, setAuthSubmitted] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [fleetFilter, setFleetFilter] = useState<FleetFilter>('ALL');
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('2D');
@@ -103,9 +111,13 @@ function App() {
   const priorShips = useRef<Map<string, ShipData>>(new Map());
 
   useEffect(() => {
+    fetch(`${apiUrl}/api/config`).then(response => response.json()).then(config => { setAccessConfig(config.access || { command: false, captainShipIds: [] }); setVesselRoster(config.vessels || []); }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
     const connection = io(apiUrl, { transports: ['websocket'] });
     setSocket(connection);
-    connection.on('fleet:state', (next: FleetState) => setState(next));
+    connection.on('fleet:state', (next: FleetState) => { if (next.ships.length > 1) setVesselRoster(current => current.length >= next.ships.length ? current : next.ships.map(({ id, name }) => ({ id, name }))); setState(next); });
     connection.on('alert:created', (alert: AlertData) => {
       setToast(alert.message);
       if (['CRITICAL', 'HIGH'].includes(alert.severity) && audio.current) {
@@ -124,9 +136,11 @@ function App() {
   useEffect(() => {
     if (!socket) return;
     let active = true;
+    const accessRequired = role === 'COMMAND' ? accessConfig.command : accessConfig.captainShipIds.length > 0;
     const joinSession = () => {
       setSessionReady(false);
-      socket.emit('session:join', { role, shipId: role === 'CAPTAIN' ? captain : undefined }, (response: any) => {
+      if (accessRequired && !authSubmitted) { socket.emit('session:leave'); return; }
+      socket.emit('session:join', { role, shipId: role === 'CAPTAIN' ? captain : undefined, accessCode }, (response: any) => {
         if (!active) return;
         setSessionReady(Boolean(response?.ok));
         if (!response?.ok) setToast(response?.error || 'Unable to join this session');
@@ -137,7 +151,7 @@ function App() {
     socket.on('disconnect', disconnected);
     if (socket.connected) joinSession();
     return () => { active = false; socket.off('connect', joinSession); socket.off('disconnect', disconnected); };
-  }, [socket, role, captain]);
+  }, [socket, role, captain, accessConfig, accessCode, authSubmitted]);
 
   useEffect(() => {
     if (!state) return;
@@ -165,8 +179,12 @@ function App() {
   }, [state]);
 
   useEffect(() => {
-    fetch(`${apiUrl}/api/history`).then(response => response.json()).then(result => setHistory(result.history || [])).catch(() => {});
-  }, []);
+    const params = new URLSearchParams({ role });
+    if (role === 'CAPTAIN') params.set('shipId', captain);
+    fetch(`${apiUrl}/api/history?${params}`, { headers: accessCode ? { 'x-access-code': accessCode } : {} })
+      .then(response => response.ok ? response.json() : { history: [] })
+      .then(result => setHistory(result.history || [])).catch(() => setHistory([]));
+  }, [role, captain, accessCode]);
 
   const ships = state?.ships || [];
   const visibleShips = role === 'CAPTAIN' ? ships.filter(ship => ship.id === captain) : ships;
@@ -178,6 +196,11 @@ function App() {
     (role !== 'CAPTAIN' || !alert.shipId || alert.shipId === captain)) || [];
   const normalCount = visibleShips.filter(ship => ship.status === 'NORMAL').length;
   const reroutingCount = visibleShips.filter(ship => ship.status === 'REROUTING').length;
+  const alertShipIds = new Set(activeAlerts.flatMap(alert => alert.shipId ? [alert.shipId] : []));
+  const sidebarShips = visibleShips.filter(ship => fleetFilter === 'ALL' ||
+    (fleetFilter === 'NORMAL' && ship.status === 'NORMAL') ||
+    (fleetFilter === 'REROUTING' && ship.status === 'REROUTING') ||
+    (fleetFilter === 'ALERTS' && alertShipIds.has(ship.id)));
   const historyFrames = useMemo(() => {
     const groups = new Map<string, any[]>();
     for (const row of history) {
@@ -215,7 +238,7 @@ function App() {
   };
   const changeRole = (nextRole: 'COMMAND' | 'CAPTAIN') => {
     if (nextRole === role) return;
-    setSelectedId(null); setHoveredId(null); setSessionReady(false); setRole(nextRole);
+    setSelectedId(null); setHoveredId(null); setSessionReady(false); setAccessCode(''); setAuthSubmitted(false); setRole(nextRole);
   };
   const editZone = (zone: any) => {
     const name = window.prompt('Restricted-zone name', zone.name);
@@ -253,7 +276,8 @@ function App() {
       <div className="role-switch">
         <button className={role === 'COMMAND' ? 'active' : ''} onClick={() => changeRole('COMMAND')}>COMMAND</button>
         <button className={role === 'CAPTAIN' ? 'active' : ''} onClick={() => changeRole('CAPTAIN')}>CAPTAIN</button>
-        {role === 'CAPTAIN' && <select value={captain} onChange={event => { setSelectedId(null); setHoveredId(null); setSessionReady(false); setCaptain(event.target.value); }}>{ships.map(ship => <option key={ship.id} value={ship.id}>{ship.name}</option>)}</select>}
+        {role === 'CAPTAIN' && <select className="captain-ship-select" aria-label="Assigned ship" value={captain} disabled={!vesselRoster.length} onChange={event => { setSelectedId(null); setHoveredId(null); setSessionReady(false); setAccessCode(''); setAuthSubmitted(false); setCaptain(event.target.value); }}>{!vesselRoster.length && <option value="">Loading ships…</option>}{vesselRoster.map(vessel => <option key={vessel.id} value={vessel.id}>{vessel.name}</option>)}</select>}
+        {(role === 'COMMAND' ? accessConfig.command : accessConfig.captainShipIds.length > 0) && <><input className="access-code" type="password" autoComplete="current-password" aria-label={`${role} access code`} placeholder={`${role} CODE`} value={accessCode} onChange={event => { setAccessCode(event.target.value); setAuthSubmitted(false); setSessionReady(false); }} /><button className="access-submit" onClick={() => setAuthSubmitted(true)}>{sessionReady ? 'AUTHORIZED' : 'CONNECT'}</button></>}
       </div>
     </header>
 
@@ -261,19 +285,21 @@ function App() {
       <aside className="fleet-panel">
         <div className="panel-heading"><span>{role === 'CAPTAIN' ? 'ASSIGNED VESSEL' : 'FLEET OVERVIEW'}</span><b>{visibleShips.length.toString().padStart(2, '0')} / {role === 'CAPTAIN' ? '01' : '15'}</b></div>
         <div className="metrics">
-          <Metric number={normalCount} label="NORMAL" />
-          <Metric number={reroutingCount} label="REROUTING" />
-          <Metric number={activeAlerts.length} label="ALERTS" />
+          <Metric number={normalCount} label="NORMAL" active={fleetFilter === 'NORMAL'} onClick={() => setFleetFilter(fleetFilter === 'NORMAL' ? 'ALL' : 'NORMAL')} />
+          <Metric number={reroutingCount} label="REROUTING" active={fleetFilter === 'REROUTING'} onClick={() => setFleetFilter(fleetFilter === 'REROUTING' ? 'ALL' : 'REROUTING')} />
+          <Metric number={activeAlerts.length} label="ALERTS" active={fleetFilter === 'ALERTS'} onClick={() => setFleetFilter(fleetFilter === 'ALERTS' ? 'ALL' : 'ALERTS')} />
         </div>
-        <div className="list-heading"><span>ACTIVE VESSELS</span><span>LIVE</span></div>
+        <div className="list-heading"><span>{fleetFilter === 'ALL' ? 'ACTIVE VESSELS' : `${fleetFilter} VESSELS`}</span>
+          <button onClick={() => setFleetFilter('ALL')} aria-pressed={fleetFilter === 'ALL'}>ALL · {visibleShips.length}</button></div>
         <div className="ship-list">
-          {visibleShips.map(ship => <button key={ship.id}
+          {sidebarShips.map(ship => <button key={ship.id}
             className={`ship-row${selectedShip?.id === ship.id ? ' selected' : ''}${hoveredId === ship.id ? ' hovered' : ''}`}
             onClick={() => setSelectedId(ship.id)} onMouseEnter={() => setHoveredId(ship.id)} onMouseLeave={() => setHoveredId(null)}>
             <i className="ship-dot" style={{ background: statusColors[ship.status] || '#46e6a5' }} />
             <span className="ship-row-copy"><strong>{ship.name}</strong><small>{ship.status.replaceAll('_', ' ')} · {(ship.speed / 1.852).toFixed(1)} kn</small></span>
             <ChevronRight size={14} />
           </button>)}
+          {!sidebarShips.length && <div className="fleet-empty">No ships in this filter</div>}
         </div>
       </aside>
 
@@ -286,8 +312,10 @@ function App() {
             <MapZoomControls />
             <DrawZone enabled={drawing} points={zonePoints} setPoints={setZonePoints} />
             {state?.zones.map(zone => <Polygon key={zone.id} positions={zone.polygon.map((point: Point) => [point.lat, point.lng])}
-              pathOptions={{ color: selectedZoneId === zone.id ? '#ff8a91' : '#ff626d', fillOpacity: 0.16, weight: selectedZoneId === zone.id ? 4 : 2 }}
-              eventHandlers={{ click: () => { if (role === 'COMMAND') setSelectedZoneId(zone.id); } }} />)}
+              pathOptions={{ color: selectedZoneId === zone.id ? '#ff8a91' : '#ff414d', fillColor: '#ff414d', fillOpacity: selectedZoneId === zone.id ? 0.24 : 0.18, weight: selectedZoneId === zone.id ? 4 : 3, dashArray: '8 5' }}
+              eventHandlers={{ click: () => { if (role === 'COMMAND') setSelectedZoneId(zone.id); } }}>
+              <Tooltip sticky>{zone.name}</Tooltip>
+            </Polygon>)}
             {playbackShips.map(ship => <Marker key={ship.id} position={[ship.latitude, ship.longitude]}
               icon={shipIcon(ship, selectedShip?.id === ship.id)}
               eventHandlers={{ click: () => { if (role === 'COMMAND' || ship.id === captain) setSelectedId(ship.id); }, mouseover: () => setHoveredId(ship.id), mouseout: () => setHoveredId(null) }}>
@@ -328,14 +356,17 @@ function App() {
         </div>
 
         <div className="map-footer-left"><span className="legend-dot normal" /> NORMAL <span className="legend-dot warning" /> REROUTING <span className="legend-dot critical" /> DISTRESS</div>
-        <div className="map-scale"><Compass size={13} /> {viewMode === '3D' ? '3D TILT VIEW' : '2D MERCATOR'}</div>
+        <div className="map-scale" title="fleet.json defines no default restricted-zone geometry. Saved zones are loaded from the database.">
+          <Compass size={13} /> {viewMode === '3D' ? '3D TILT VIEW' : '2D MERCATOR'}
+          <span className="map-zone-count"><i /> {state?.zones.length || 0} RESTRICTED</span>
+        </div>
       </section>
 
       <aside className="intel-panel">
         <div className="panel-heading"><span>ALERT CENTER</span><b className={activeAlerts.some(alert => alert.severity === 'CRITICAL') ? 'alert-count critical-count' : 'alert-count'}>{activeAlerts.length.toString().padStart(2, '0')}</b></div>
         <div className="alerts-list">
           {activeAlerts.slice(0, 5).map(alert => <article key={alert.id} className={`alert-card ${alert.severity.toLowerCase()}`}>
-            <div className="alert-type"><TriangleAlert size={13} />{alert.type.replaceAll('_', ' ')}</div><p>{alert.message}</p>
+            <div className="alert-type"><TriangleAlert size={13} />{alert.type.replaceAll('_', ' ')}</div><p>{alert.message}</p>{alert.type === 'DISTRESS' && alert.metadata && <small className="distress-analysis">{alert.metadata.issue} · {alert.metadata.injuryCount} injured{alert.metadata.cargoDamagePercent == null ? '' : ` · ${alert.metadata.cargoDamagePercent}% cargo damage`} · {alert.metadata.source === 'ai' ? 'AI analyzed' : `local fallback${alert.metadata.fallbackReason ? ` · ${alert.metadata.fallbackReason}` : ''}`}</small>}
             {alert.status === 'ACTIVE' && <button onClick={() => emit('alert:ack', alert.id)}><Check size={12} /> ACKNOWLEDGE</button>}
           </article>)}
           {!activeAlerts.length && <div className="empty-state"><Activity size={17} /><span>NO ACTIVE INCIDENTS</span></div>}
@@ -362,8 +393,10 @@ function App() {
   </div>;
 }
 
-function Metric({ number, label }: { number: number; label: string }) {
-  return <div className="metric"><strong>{number.toString().padStart(2, '0')}</strong><span>{label}</span></div>;
+function Metric({ number, label, active, onClick }: { number: number; label: string; active: boolean; onClick: () => void }) {
+  return <button className={`metric${active ? ' active' : ''}`} aria-pressed={active} onClick={onClick}>
+    <strong>{number.toString().padStart(2, '0')}</strong><span>{label}</span>
+  </button>;
 }
 
 function ShipCard({ ship, command, directive }: { ship: ShipData; command: boolean; directive: () => void }) {

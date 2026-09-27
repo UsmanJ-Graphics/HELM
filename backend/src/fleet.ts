@@ -1,6 +1,13 @@
 const FUEL_CAPACITY_TONS = 10_000;
 const KM_PER_KNOT = 1.852;
 
+/** The supplied simplified water ring pinches shut at Hormuz. This narrow
+ * operational connector restores the intended passage between the Gulf and
+ * Gulf of Oman while preserving the original fleet boundary. GeoJSON order. */
+const HORMUZ_CONNECTOR: [number, number][] = [
+  [56.30, 26.48], [56.65, 26.48], [56.65, 26.30], [56.30, 26.30], [56.30, 26.48],
+];
+
 /** Convert the supplied Code Rush fleet data into the simulator's internal units. */
 export function adaptFleet(source: any) {
   const ports = new Map(source.ports.map((port: any) => [port.id, port]));
@@ -14,6 +21,7 @@ export function adaptFleet(source: any) {
     },
     // The supplied polygon is [lat, lng]; Turf/GeoJSON uses [lng, lat].
     navigablePolygon: source.navigableWater.map(([lat, lng]: [number, number]) => [lng, lat]),
+    navigablePolygons: [source.navigableWater.map(([lat, lng]: [number, number]) => [lng, lat]), HORMUZ_CONNECTOR],
     ships: source.fleet.map((ship: any) => {
       const port: any = ports.get(ship.destination);
       if (!port) throw new Error(`Unknown destination port ${ship.destination} for ${ship.name}`);

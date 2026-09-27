@@ -5,6 +5,7 @@ import { FleetEngine } from './engine.js';
 const fleet=adaptFleet(sourceFleet);
 describe('fleet engine',()=>{
  it('loads exactly 15 ships',()=>expect(new FleetEngine(fleet).ships).toHaveLength(15));
+ it('finds navigable routes for the supplied 15 ships with no restricted zones',()=>{const e=new FleetEngine(fleet);expect(e.zones).toHaveLength(0);expect(e.ships.filter(s=>s.status==='STRANDED')).toHaveLength(0);expect(e.ships.every(s=>s.route.length>0)).toBe(true)});
  it('creates a geofence breach for a ship captured by a new zone',()=>{const e=new FleetEngine(fleet);const s=e.ships[0];e.addZone([{lat:s.latitude-.1,lng:s.longitude-.1},{lat:s.latitude+.1,lng:s.longitude-.1},{lat:s.latitude+.1,lng:s.longitude+.1},{lat:s.latitude-.1,lng:s.longitude+.1}],'Test','COMMAND');expect(e.alerts.some(a=>a.type==='GEOFENCE_BREACH')).toBe(true)});
  it('enforces captain directive acceptance state',()=>{const e=new FleetEngine(fleet);e.issue('MV-1','HOLD',{});e.respond('MV-1','ACCEPT',{});expect(e.ship('MV-1').status).toBe('STOPPED')});
  it('raises one proximity alert for ships within two kilometres',()=>{const e=new FleetEngine(fleet);const a=e.ships[0],b=e.ships[1];b.latitude=a.latitude+.005;b.longitude=a.longitude; (e as any).proximity();expect(e.alerts.filter(x=>x.type==='PROXIMITY')).toHaveLength(1)});
