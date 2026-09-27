@@ -71,13 +71,15 @@ function MapZoomControls() {
   </div>;
 }
 
-function DrawZone({ onComplete }: { onComplete: (points: Point[]) => void }) {
-  const [points, setPoints] = useState<Point[]>([]);
+function DrawZone({ enabled, points, setPoints }: { enabled: boolean; points: Point[]; setPoints: React.Dispatch<React.SetStateAction<Point[]>> }) {
   useMapEvents({
-    click(event) { setPoints(current => [...current, { lat: event.latlng.lat, lng: event.latlng.lng }]); },
-    dblclick() { if (points.length >= 3) { onComplete(points); setPoints([]); } },
+    click(event) { if (enabled) setPoints(current => [...current, { lat: event.latlng.lat, lng: event.latlng.lng }]); },
   });
-  return points.length ? <Polyline positions={points.map(point => [point.lat, point.lng])} pathOptions={{ color: '#ff626d', dashArray: '6 6' }} /> : null;
+  if (!enabled || !points.length) return null;
+  const positions = points.map(point => [point.lat, point.lng] as [number, number]);
+  return points.length >= 3
+    ? <Polygon positions={positions} pathOptions={{ color: '#ff626d', fillColor: '#ff626d', fillOpacity: .18, dashArray: '6 6' }} />
+    : <Polyline positions={positions} pathOptions={{ color: '#ff626d', dashArray: '6 6' }} />;
 }
 
 function App() {
@@ -92,6 +94,7 @@ function App() {
   const [cursor, setCursor] = useState<Point | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('2D');
   const [drawing, setDrawing] = useState(false);
+  const [zonePoints, setZonePoints] = useState<Point[]>([]);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [playback, setPlayback] = useState<number | null>(null);
@@ -189,10 +192,10 @@ function App() {
   const playbackFleet = playback === null ? visualShips : historyFrames[playback]?.ships || [];
   const playbackShips = role === 'CAPTAIN' ? playbackFleet.filter(ship => ship.id === captain) : playbackFleet;
 
-  const emit = (event: string, payload: any, done?: () => void) => {
+  const emit = (event: string, payload: any, done?: (response: any) => void) => {
     socket?.emit(event, payload, (response: any) => {
       if (!response?.ok) setToast(response?.error || 'Request rejected');
-      else done?.();
+      else done?.(response);
     });
   };
   const enableAudio = () => {
@@ -227,11 +230,21 @@ function App() {
     } catch { setToast('Enter at least three valid latitude/longitude points'); }
   };
   const deleteZone = (zone: any) => {
-    if (!window.confirm(`Delete restricted zone “${zone.name}”?`)) return;
-    emit('zone:delete', zone.id);
-    setSelectedZoneId(null);
+    if (!window.confirm(`Remove restrictions for “${zone.name}”?`)) return;
+    emit('zone:delete', zone.id, () => { setSelectedZoneId(null); setToast(`Restrictions removed: ${zone.name}`); });
   };
-  const startDrawing = () => setDrawing(value => !value);
+  const startDrawing = () => { setZonePoints([]); setSelectedZoneId(null); setDrawing(true); };
+  const cancelDrawing = () => { setDrawing(false); setZonePoints([]); };
+  const finishDrawing = () => {
+    if (zonePoints.length < 3) return;
+    const name = window.prompt('Name this restricted zone', 'Restricted zone');
+    if (!name?.trim()) return;
+    emit('zone:create', { name: name.trim(), polygon: zonePoints }, response => {
+      setToast('Restricted zone saved. Intersecting ship routes are being recalculated.');
+      setSelectedZoneId(response?.data?.id || null);
+    });
+    cancelDrawing();
+  };
 
   return <div className="shell" onPointerDown={enableAudio}>
     <header className="topbar">
@@ -266,16 +279,12 @@ function App() {
 
       <section className={`map-wrap${viewMode === '3D' ? ' mode-3d' : ''}`}>
         <div className="map-surface">
-          <MapContainer center={[26, 56]} zoom={7} zoomControl={false} preferCanvas>
+          <MapContainer center={[26, 56]} zoom={7} zoomControl={false} doubleClickZoom={false} preferCanvas>
             <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             <MapEvents onCursor={setCursor} />
             <MapFocus ship={selectedShip} ships={visibleShips} />
             <MapZoomControls />
-            {drawing && <DrawZone onComplete={points => {
-              const name = window.prompt('Restricted-zone name', 'Restricted zone');
-              if (name) emit('zone:create', { name, polygon: points });
-              setDrawing(false);
-            }} />}
+            <DrawZone enabled={drawing} points={zonePoints} setPoints={setZonePoints} />
             {state?.zones.map(zone => <Polygon key={zone.id} positions={zone.polygon.map((point: Point) => [point.lat, point.lng])}
               pathOptions={{ color: selectedZoneId === zone.id ? '#ff8a91' : '#ff626d', fillOpacity: 0.16, weight: selectedZoneId === zone.id ? 4 : 2 }}
               eventHandlers={{ click: () => { if (role === 'COMMAND') setSelectedZoneId(zone.id); } }} />)}
@@ -295,15 +304,16 @@ function App() {
         <div className="map-toolbar">
           <div className="map-mode"><button className={viewMode === '2D' ? 'active' : ''} onClick={() => setViewMode('2D')}>2D</button>
             <button className={viewMode === '3D' ? 'active' : ''} onClick={() => setViewMode('3D')}>3D</button></div>
-          {role === 'COMMAND' && <button className={`map-action${drawing ? ' cancel' : ''}`} onClick={startDrawing}>
-            {drawing ? <X size={14} /> : <MapPin size={14} />}{drawing ? 'CANCEL ZONE' : 'DRAW RESTRICTED ZONE'}
-          </button>}
+          {role === 'COMMAND' && (drawing ? <div className="zone-draw-controls">
+            <span>CLICK MAP TO ADD POINTS · {zonePoints.length}</span>
+            <button className="map-action zone-confirm" disabled={zonePoints.length < 3} onClick={finishDrawing}><Check size={13} /> OK</button>
+            <button className="map-action cancel" onClick={cancelDrawing}><X size={13} /> CANCEL</button>
+          </div> : <button className="map-action" onClick={startDrawing}><MapPin size={14} /> DRAW RESTRICTED ZONE</button>)}
           {selectedZone && role === 'COMMAND' && <>
             <button className="map-action zone-edit" onClick={() => editZone(selectedZone)}>EDIT: {selectedZone.name}</button>
-            <button className="map-action zone-delete" onClick={() => deleteZone(selectedZone)}>DELETE ZONE</button>
+            <button className="map-action zone-delete" onClick={() => deleteZone(selectedZone)}>REMOVE RESTRICTIONS</button>
             <button className="map-action" aria-label="Deselect zone" onClick={() => setSelectedZoneId(null)}><X size={13} /></button>
           </>}
-          <span className="weather-state"><CloudLightning size={14} />{state?.weatherFallback ? 'SYNTHETIC WEATHER' : 'LIVE WEATHER'}</span>
         </div>
 
         <div className="map-readout">
@@ -311,6 +321,10 @@ function App() {
           <i />
           <div><span><ShipIcon size={13} /> {detailShip ? detailShip.name.toUpperCase() : 'FLEET POSITION'}</span>
             <strong>{detailShip ? `${coordinate(detailShip.latitude, 'lat')}  ${coordinate(detailShip.longitude, 'lng')}` : `${ships.length} TRACKED`}</strong></div>
+          <i />
+          <div className="weather-readout" title="Wind conditions are sampled for fleet positions and destinations. Fallback is used if live weather is unavailable.">
+            <span><CloudLightning size={13} /> WEATHER</span><strong>{state?.weatherFallback ? 'FALLBACK' : 'LIVE DATA'}</strong>
+          </div>
         </div>
 
         <div className="map-footer-left"><span className="legend-dot normal" /> NORMAL <span className="legend-dot warning" /> REROUTING <span className="legend-dot critical" /> DISTRESS</div>
